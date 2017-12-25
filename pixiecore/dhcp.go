@@ -120,28 +120,19 @@ func (s *Server) validateDHCP(pkt *dhcp4.Packet) (mach Machine, isIpxe bool, fwt
 		return mach, false, 0, errors.New("malformed client GUID (option 97), wrong size")
 	}
 
-	// iPXE options
-	supportsHTTP, supportsBzImage := false, false
-	if len(pkt.Options[175]) > 0 {
-		bs := pkt.Options[175]
-		for len(bs) > 0 {
-			if len(bs) < 2 || len(bs)-2 < int(bs[1]) {
-				return mach, false, 0, errors.New("malformed iPXE option")
-			}
-			switch bs[0] {
-			case 19:
-				// This iPXE build supports HTTP.
-				supportsHTTP = true
-			case 24:
-				// This iPXE build supports bzImage.
-				supportsBzImage = true
-			}
-			bs = bs[2+int(bs[1]):]
-		}
+	// Pixiecore's embedded iPXE sets the user-class in its requests,
+	// so we can tell it apart from a machine's embedded iPXE
+	// firmware. This lets us break the boot loop.
+	//
+	// Why don't we just chainload straight to an ipxe script if the
+	// machine brings its own iPXE? We don't know what options it was
+	// compiled with. Maybe it doesn't support bzImage (looking at you
+	// VirtualBox). We could check each supported option code one by
+	// one, or we could just chainload any PXE firmware into our own,
+	// known version/configuration of iPXE, and chainload from there.
+	if userClass, err := pkt.Options.String(77); err == nil && userClass == "pixiecore" {
+		isIpxe = true
 	}
-	// This firmware is an appropriate iPXE if it can speak HTTP and
-	// bzImage. If not, we'll chainload our own internal iPXE.
-	isIpxe = supportsHTTP && supportsBzImage
 
 	mach.MAC = pkt.HardwareAddr
 	mach.Arch = fwToArch[fwtype]
